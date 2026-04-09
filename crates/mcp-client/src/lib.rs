@@ -1,12 +1,14 @@
 //! # mcp-client
 //!
-//! Model Context Protocol (MCP) client SDK.
+//! Model Context Protocol (MCP) toolkit — client, server, lifecycle, and registry.
 //!
-//! MCP is a protocol for connecting AI models to external tools and data sources.
-//! This crate provides a client that can connect to MCP servers via stdio
-//! (subprocess) transport, discover their tools/resources, and invoke them.
+//! This crate provides a comprehensive MCP implementation:
+//! - **Client** — connect to MCP servers, discover tools/resources, and invoke them
+//! - **Server** — expose your own tools to external MCP clients via JSON-RPC
+//! - **Lifecycle** — state machine for connection phases with error tracking
+//! - **Registry** — thread-safe tool/resource registry for multi-server management
 //!
-//! # Example
+//! # Client Example
 //!
 //! ```no_run
 //! use mcp_client::{McpClient, StdioTransport};
@@ -17,6 +19,10 @@
 //! let tools = client.list_tools().unwrap();
 //! let result = client.call_tool("search_repos", serde_json::json!({"query": "rust"})).unwrap();
 //! ```
+
+pub mod server;
+pub mod lifecycle;
+pub mod registry;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

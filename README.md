@@ -3,7 +3,7 @@
 > AI Agent 开发工具库 — 从 Claude Code 核心架构提取的可复用 Rust 组件
 
 [![Rust](https://img.shields.io/badge/rust-1.75%2B-orange.svg)](https://www.rust-lang.org/)
-[![Tests](https://img.shields.io/badge/tests-87%2F87-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/tests-110%2F110-brightgreen.svg)]()
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 ## 📖 简介
@@ -95,7 +95,7 @@ cargo build
 ### 测试
 
 ```bash
-cargo test          # 运行全部 87 个测试
+cargo test          # 运行全部 110 个测试
 cargo test -p sse-parser  # 单独测试某个 crate
 ```
 
@@ -250,10 +250,11 @@ pipeline.pre("bash", |ctx| {
 });
 ```
 
-### `mcp-client` — MCP 客户端 SDK
+### `mcp-client` — MCP 完整协议栈
 
-通过 Stdio 子进程与 MCP Server 通信，支持 tools/resources。
+完整的 MCP 协议实现：客户端 + 服务端 + 生命周期状态机 + 工具注册表。
 
+**客户端** — 通过 Stdio 子进程与 MCP Server 通信：
 ```rust
 use mcp_client::{McpClient, StdioTransport};
 
@@ -261,6 +262,46 @@ let transport = StdioTransport::new("npx", &["-y", "@mcp/server-github"])?;
 let mut client = McpClient::new(transport)?;
 let tools = client.list_tools()?;
 let result = client.call_tool("search_repos", json!({"query": "rust"}))?;
+```
+
+**服务端** — 让你的 Agent 作为 MCP Server 暴露工具：
+```rust
+use mcp_client::server::{McpServer, McpServerSpec, McpServerTool};
+
+let spec = McpServerSpec {
+    server_name: "my-agent".into(),
+    server_version: "1.0.0".into(),
+    tools: vec![McpServerTool {
+        name: "greet".into(),
+        description: Some("Say hello".into()),
+        input_schema: Some(json!({"type": "object"})),
+    }],
+    tool_handler: Box::new(|name, args| Ok(format!("Hello from {name}"))),
+};
+let server = McpServer::new(spec);
+```
+
+**生命周期** — 连接状态机 + 错误分级：
+```rust
+use mcp_client::lifecycle::{McpLifecycleValidator, McpLifecyclePhase};
+
+let mut validator = McpLifecycleValidator::new();
+assert!(validator.run_phase(McpLifecyclePhase::ConfigLoad).is_success());
+assert!(validator.run_phase(McpLifecyclePhase::ServerRegistration).is_success());
+// Invalid transition → structured failure
+let result = validator.run_phase(McpLifecyclePhase::Ready);
+assert!(!result.is_success());
+```
+
+**工具注册表** — 多 Server 连接管理：
+```rust
+use mcp_client::registry::{McpToolRegistry, McpConnectionStatus, McpToolInfo};
+
+let registry = McpToolRegistry::new();
+registry.register_server("github", McpConnectionStatus::Connected,
+    vec![McpToolInfo { name: "search".into(), description: None, input_schema: None }],
+    vec![], Some("GitHub MCP v1".into()));
+let tools = registry.list_tools("github")?;
 ```
 
 ### `agent-test` — Agent 测试框架
@@ -297,9 +338,9 @@ assert!(results.all_passed());
 | prompt-memory | 7 | 指令发现 + Prompt 组装 |
 | llm-client | 5 | 统一 LLM 客户端 |
 | agent-loop | 5 | Agent 循环框架 |
-| mcp-client | 4 | MCP 协议客户端 |
+| mcp-client | 27 | MCP Client + Server + Lifecycle + Registry |
 | agent-test | 6 | Agent 测试框架 |
-| **Total** | **87** | **10 crates** |
+| **Total** | **110** | **10 crates** |
 
 ## 📄 License
 
