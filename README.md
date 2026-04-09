@@ -55,7 +55,7 @@ safe-fs    (独立)
 ### 构建
 
 ```bash
-git clone https://github.com/YOUR_USER/claw-toolkit.git
+git clone https://github.com/AIzishuwang/claw-toolkit.git
 cd claw-toolkit
 cargo build
 ```
