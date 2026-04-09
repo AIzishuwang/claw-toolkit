@@ -29,8 +29,11 @@ use permission_engine::{PermissionEngine, PermissionLevel};
 use session_store::{Session, TokenUsage};
 use tool_hooks::HookPipeline;
 
+pub use prompt_memory::{ProjectContext, SystemPromptBuilder, SYSTEM_PROMPT_DYNAMIC_BOUNDARY};
+
 use serde_json::Value;
 use thiserror::Error;
+use std::path::PathBuf;
 
 /// Errors from the agent loop.
 #[derive(Debug, Error)]
@@ -70,6 +73,15 @@ pub struct AgentConfig {
     pub compact_keep_recent: usize,
     /// System prompt lines.
     pub system_prompt: Vec<String>,
+    /// Working directory for instruction file discovery. When set,
+    /// `prompt-memory` will walk the ancestor chain to find `CLAUDE.md` files
+    /// and auto-build the system prompt.
+    pub cwd: Option<PathBuf>,
+    /// Whether to auto-discover instruction files (CLAUDE.md, etc.).
+    /// Requires `cwd` to be set. Default: true.
+    pub discover_instructions: bool,
+    /// Current date string injected into the prompt environment section.
+    pub current_date: Option<String>,
 }
 
 impl Default for AgentConfig {
@@ -79,6 +91,9 @@ impl Default for AgentConfig {
             auto_compact_threshold: 100_000,
             compact_keep_recent: 20,
             system_prompt: Vec::new(),
+            cwd: None,
+            discover_instructions: true,
+            current_date: None,
         }
     }
 }
@@ -117,6 +132,11 @@ pub struct ToolCallResult {
 }
 
 /// The core agentic loop.
+///
+/// When `AgentConfig::cwd` is set and `discover_instructions` is true,
+/// the agent automatically scans the ancestor directory chain for
+/// instruction files (`CLAUDE.md`, `.claw/instructions.md`, etc.)
+/// and includes them in the system prompt sent to the LLM.
 pub struct AgentLoop {
     client: LlmClient,
     tools: Vec<Box<dyn Tool>>,
@@ -125,15 +145,22 @@ pub struct AgentLoop {
     hooks: HookPipeline,
     permissions: Option<PermissionEngine>,
     total_usage: Usage,
+    /// Rendered system prompt (built from config + discovered instructions).
+    system_prompt: Option<String>,
 }
 
 impl AgentLoop {
     /// Create a new agent loop.
+    ///
+    /// If `config.cwd` is set and `config.discover_instructions` is true,
+    /// instruction files will be automatically discovered and included in
+    /// the system prompt.
     pub fn new(
         provider: impl LlmProvider + 'static,
         tools: Vec<Box<dyn Tool>>,
         config: AgentConfig,
     ) -> Self {
+        let system_prompt = build_system_prompt(&config);
         Self {
             client: LlmClient::custom(provider),
             tools,
@@ -142,6 +169,7 @@ impl AgentLoop {
             hooks: HookPipeline::new(),
             permissions: None,
             total_usage: Usage::default(),
+            system_prompt,
         }
     }
 
@@ -347,11 +375,12 @@ impl AgentLoop {
     }
 
     fn build_messages(&self) -> Vec<Message> {
-        self.session
+        let mut messages: Vec<Message> = self.session
             .messages()
             .iter()
             .map(|m| {
                 let role = match m.role {
+                    session_store::MessageRole::System => llm_client::Role::User,
                     session_store::MessageRole::User => llm_client::Role::User,
                     session_store::MessageRole::Assistant => llm_client::Role::Assistant,
                 };
@@ -379,7 +408,19 @@ impl AgentLoop {
                 };
                 Message { role, content }
             })
-            .collect()
+            .collect();
+
+        // Prepend system prompt as the first user message if present
+        if let Some(ref prompt) = self.system_prompt {
+            messages.insert(0, Message {
+                role: llm_client::Role::User,
+                content: llm_client::MessageContent::Text(
+                    format!("[System instructions — do not acknowledge, just follow them]\n\n{prompt}"),
+                ),
+            });
+        }
+
+        messages
     }
 
     fn parse_events(events: Vec<StreamEvent>) -> (Vec<ContentBlock>, Usage) {
@@ -413,6 +454,41 @@ impl AgentLoop {
         }
 
         (blocks, usage)
+    }
+}
+
+/// Build a rendered system prompt from the agent config.
+///
+/// When `config.cwd` is set and `config.discover_instructions` is true,
+/// this function discovers instruction files and builds a full prompt via
+/// `prompt_memory::SystemPromptBuilder`.
+fn build_system_prompt(config: &AgentConfig) -> Option<String> {
+    // If explicit system_prompt lines are provided, use them directly
+    if !config.system_prompt.is_empty() {
+        return Some(config.system_prompt.join("\n"));
+    }
+
+    // Otherwise, try auto-discovery via prompt-memory
+    let cwd = config.cwd.as_ref()?;
+    if !config.discover_instructions {
+        return None;
+    }
+
+    let date = config
+        .current_date
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let ctx = prompt_memory::ProjectContext::discover_with_git(cwd, &date).ok()?;
+
+    let prompt = prompt_memory::SystemPromptBuilder::new()
+        .with_project_context(ctx)
+        .render();
+
+    if prompt.trim().is_empty() {
+        None
+    } else {
+        Some(prompt)
     }
 }
 

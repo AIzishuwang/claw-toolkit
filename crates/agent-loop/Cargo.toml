@@ -14,3 +14,4 @@ llm-client = { path = "../llm-client" }
 tool-hooks = { path = "../tool-hooks" }
 permission-engine = { path = "../permission-engine" }
 session-store = { path = "../session-store" }
+prompt-memory = { path = "../prompt-memory" }
