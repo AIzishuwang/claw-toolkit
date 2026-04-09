@@ -1,0 +1,13 @@
+[package]
+name = "safe-fs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Defensive file system operations with path traversal prevention, binary detection, and workspace boundary enforcement"
+
+[dependencies]
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
